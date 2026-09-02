@@ -48,7 +48,7 @@ function setupSheets() {
     "ID", "MaHS", "HoTen", "LopTruong", "SDT_PHHS", "MaTraCuu"
   ]);
   ensureSheet(ss, "LOP_HOC", [
-    "ID", "TenLop", "MonHoc", "LichHoc", "HocPhiThang"
+    "ID", "TenLop", "MonHoc", "LichHoc", "HocPhiMoiBuoi"
   ]);
   ensureSheet(ss, "DANG_KY_LOP", [
     "ID", "HocSinhID", "LopHocID"
@@ -56,10 +56,21 @@ function setupSheets() {
   ensureSheet(ss, "DIEM_DANH", [
     "ID", "Ngay", "LopHocID", "HocSinhID", "TrangThai"
   ]);
+  ensureSheet(ss, "BANG_DIEM", [
+    "ID", "Ngay", "LopHocID", "HocSinhID", "TenBai", "Diem"
+  ]);
+  ensureSheet(ss, "NHAN_XET", [
+    "ID", "Ngay", "LopHocID", "HocSinhID", "NoiDung"
+  ]);
   ensureSheet(ss, "HOC_PHI", [
-    "ID", "HocSinhID", "Thang", "SoTien", "TrangThai", "NgayDong"
+    "ID", "HocSinhID", "Thang", "SoTien", "TrangThai", "NgayDong",
+    "LopHocID", "SoBuoi", "DonGia"
   ]);
   ensureSheet(ss, "CAI_DAT_TRUNG_TAM", ["Khoa", "GiaTri"]);
+  ensureColumns(ss.getSheetByName("HOC_PHI"), [
+    "LopHocID", "SoBuoi", "DonGia"
+  ]);
+  ss.getSheetByName("LOP_HOC").getRange(1, 5).setValue("HocPhiMoiBuoi");
 }
 
 function ensureSheet(ss, name, headers) {
@@ -75,6 +86,16 @@ function ensureSheet(ss, name, headers) {
   }
 }
 
+function ensureColumns(sheet, names) {
+  var lastColumn = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  names.forEach(function(name) {
+    if (headers.indexOf(name) >= 0) return;
+    sheet.getRange(1, headers.length + 1).setValue(name);
+    headers.push(name);
+  });
+}
+
 function readAllData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   setupSheets();
@@ -88,7 +109,7 @@ function readAllData() {
     classes: rows(ss, "LOP_HOC").map(function(r) {
       return {
         id: r.ID, name: r.TenLop, subject: r.MonHoc,
-        schedule: r.LichHoc, tuition: r.HocPhiThang
+        schedule: r.LichHoc, tuition: r.HocPhiMoiBuoi || r.HocPhiThang
       };
     }),
     enrollments: rows(ss, "DANG_KY_LOP").map(function(r) {
@@ -100,10 +121,25 @@ function readAllData() {
         studentId: r.HocSinhID, status: r.TrangThai
       };
     }),
+    grades: rows(ss, "BANG_DIEM").map(function(r) {
+      return {
+        id: r.ID, date: r.Ngay, classId: r.LopHocID,
+        studentId: r.HocSinhID, title: r.TenBai,
+        score: Number(String(r.Diem || "").replace(",", "."))
+      };
+    }),
+    comments: rows(ss, "NHAN_XET").map(function(r) {
+      return {
+        id: r.ID, date: r.Ngay, classId: r.LopHocID,
+        studentId: r.HocSinhID, text: r.NoiDung
+      };
+    }),
     fees: rows(ss, "HOC_PHI").map(function(r) {
       return {
         id: r.ID, studentId: r.HocSinhID, month: r.Thang,
-        amount: Number(r.SoTien || 0), status: r.TrangThai, paidAt: r.NgayDong
+        amount: Number(r.SoTien || 0), status: r.TrangThai, paidAt: r.NgayDong,
+        classId: r.LopHocID, sessions: Number(r.SoBuoi || 0),
+        unitPrice: Number(r.DonGia || 0)
       };
     })
   };
@@ -149,11 +185,25 @@ function saveRecord(type, record) {
         record.id, record.date, record.classId, record.studentId, record.status
       ]
     },
+    grade: {
+      sheet: "BANG_DIEM",
+      values: [
+        record.id, record.date, record.classId, record.studentId,
+        record.title, record.score
+      ]
+    },
+    comment: {
+      sheet: "NHAN_XET",
+      values: [
+        record.id, record.date, record.classId, record.studentId, record.text
+      ]
+    },
     fee: {
       sheet: "HOC_PHI",
       values: [
         record.id, record.studentId, record.month, record.amount,
-        record.status, record.paidAt || ""
+        record.status, record.paidAt || "", record.classId || "",
+        Number(record.sessions || 0), Number(record.unitPrice || 0)
       ]
     }
   };
@@ -202,6 +252,12 @@ function readParentProfile(pin) {
       return x.studentId === student.id;
     }),
     fees: data.fees.filter(function(x) {
+      return x.studentId === student.id;
+    }),
+    grades: data.grades.filter(function(x) {
+      return x.studentId === student.id;
+    }),
+    comments: data.comments.filter(function(x) {
       return x.studentId === student.id;
     })
   };
