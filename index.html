@@ -34,6 +34,8 @@
     const PUBLIC_API_URL="https://script.google.com/macros/s/AKfycbybUrOlatKVbsMQNUUpcGiYPYUsiqFBMKGWKi96hEsSHVVa3YhFgdHfNmaXi9GUblgM_g/exec";
     const initial={settings:{name:"TRUNG TÂM HỌC TẬP",apiUrl:"",adminKey:""},students:[],classes:[],enrollments:[],attendance:[],fees:[],grades:[],comments:[]};
     let state=JSON.parse(localStorage.getItem(STORAGE)||"null")||structuredClone(initial);
+    state.grades=Array.isArray(state.grades)?state.grades:[];
+    state.comments=Array.isArray(state.comments)?state.comments:[];
     let currentView="dashboard";
     let selectedAttendanceClassId="";
     let selectedClassDetailId="";
