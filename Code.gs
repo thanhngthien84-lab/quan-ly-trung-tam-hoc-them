@@ -62,6 +62,9 @@ function setupSheets() {
   ensureSheet(ss, "NHAN_XET", [
     "ID", "Ngay", "LopHocID", "HocSinhID", "NoiDung"
   ]);
+  ensureSheet(ss, "KET_QUA_HOC_TAP", [
+    "Ngay", "TenLop", "MaHS", "HoTen", "TenBai", "Diem", "NhanXet"
+  ]);
   ensureSheet(ss, "HOC_PHI", [
     "ID", "HocSinhID", "Thang", "SoTien", "TrangThai", "NgayDong",
     "LopHocID", "SoBuoi", "DonGia"
@@ -71,6 +74,24 @@ function setupSheets() {
     "LopHocID", "SoBuoi", "DonGia"
   ]);
   ss.getSheetByName("LOP_HOC").getRange(1, 5).setValue("HocPhiMoiBuoi");
+  configureLearningInput(ss);
+}
+
+function configureLearningInput(ss) {
+  var sheet = ss.getSheetByName("KET_QUA_HOC_TAP");
+  var classSheet = ss.getSheetByName("LOP_HOC");
+  var studentSheet = ss.getSheetByName("HOC_SINH");
+  if (!sheet || !classSheet || !studentSheet) return;
+  var classRule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(classSheet.getRange("B2:B1000"), true)
+    .setAllowInvalid(true).build();
+  var studentRule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(studentSheet.getRange("B2:B1000"), true)
+    .setAllowInvalid(true).build();
+  sheet.getRange("B2:B1000").setDataValidation(classRule);
+  sheet.getRange("C2:C1000").setDataValidation(studentRule);
+  sheet.getRange("A2:A1000").setNumberFormat("dd/MM/yyyy");
+  sheet.getRange("F2:F1000").setNumberFormat("0.00");
 }
 
 function ensureSheet(ss, name, headers) {
@@ -99,50 +120,104 @@ function ensureColumns(sheet, names) {
 function readAllData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   setupSheets();
+
+  var students = rows(ss, "HOC_SINH").map(function(r) {
+    return {
+      id: r.ID, code: r.MaHS, name: r.HoTen,
+      schoolClass: r.LopTruong, phone: r.SDT_PHHS, pin: r.MaTraCuu
+    };
+  });
+  var classes = rows(ss, "LOP_HOC").map(function(r) {
+    return {
+      id: r.ID, name: r.TenLop, subject: r.MonHoc,
+      schedule: r.LichHoc, tuition: r.HocPhiMoiBuoi || r.HocPhiThang
+    };
+  });
+  var enrollments = rows(ss, "DANG_KY_LOP").map(function(r) {
+    return { id: r.ID, studentId: r.HocSinhID, classId: r.LopHocID };
+  });
+  var attendance = rows(ss, "DIEM_DANH").map(function(r) {
+    return {
+      id: r.ID, date: r.Ngay, classId: r.LopHocID,
+      studentId: r.HocSinhID, status: r.TrangThai
+    };
+  });
+  var fees = rows(ss, "HOC_PHI").map(function(r) {
+    return {
+      id: r.ID, studentId: r.HocSinhID, month: r.Thang,
+      amount: Number(r.SoTien || 0), status: r.TrangThai, paidAt: r.NgayDong,
+      classId: r.LopHocID, sessions: Number(r.SoBuoi || 0),
+      unitPrice: Number(r.DonGia || 0)
+    };
+  });
+  var grades = rows(ss, "BANG_DIEM").map(function(r) {
+    return {
+      id: r.ID, date: r.Ngay, classId: r.LopHocID,
+      studentId: r.HocSinhID, title: r.TenBai,
+      score: Number(String(r.Diem || "").replace(",", "."))
+    };
+  });
+  var comments = rows(ss, "NHAN_XET").map(function(r) {
+    return {
+      id: r.ID, date: r.Ngay, classId: r.LopHocID,
+      studentId: r.HocSinhID, text: r.NoiDung
+    };
+  });
+
+  var learningRows = rows(ss, "KET_QUA_HOC_TAP");
+  learningRows.forEach(function(r, index) {
+    var classItem = findClass(classes, r.TenLop);
+    var student = findStudent(students, r.MaHS, r.HoTen);
+    if (!classItem || !student) return;
+    var baseId = "sheet-" + (index + 2) + "-" + classItem.id + "-" + student.id;
+    var rawScore = String(r.Diem || "").trim().replace(",", ".");
+    if (rawScore !== "" && isFinite(Number(rawScore))) {
+      grades.push({
+        id: baseId + "-diem", date: r.Ngay, classId: classItem.id,
+        studentId: student.id, title: r.TenBai || "Bài kiểm tra",
+        score: Number(rawScore)
+      });
+    }
+    if (String(r.NhanXet || "").trim()) {
+      comments.push({
+        id: baseId + "-nx", date: r.Ngay, classId: classItem.id,
+        studentId: student.id, text: String(r.NhanXet).trim()
+      });
+    }
+  });
+
   return {
-    students: rows(ss, "HOC_SINH").map(function(r) {
-      return {
-        id: r.ID, code: r.MaHS, name: r.HoTen,
-        schoolClass: r.LopTruong, phone: r.SDT_PHHS, pin: r.MaTraCuu
-      };
-    }),
-    classes: rows(ss, "LOP_HOC").map(function(r) {
-      return {
-        id: r.ID, name: r.TenLop, subject: r.MonHoc,
-        schedule: r.LichHoc, tuition: r.HocPhiMoiBuoi || r.HocPhiThang
-      };
-    }),
-    enrollments: rows(ss, "DANG_KY_LOP").map(function(r) {
-      return { id: r.ID, studentId: r.HocSinhID, classId: r.LopHocID };
-    }),
-    attendance: rows(ss, "DIEM_DANH").map(function(r) {
-      return {
-        id: r.ID, date: r.Ngay, classId: r.LopHocID,
-        studentId: r.HocSinhID, status: r.TrangThai
-      };
-    }),
-    grades: rows(ss, "BANG_DIEM").map(function(r) {
-      return {
-        id: r.ID, date: r.Ngay, classId: r.LopHocID,
-        studentId: r.HocSinhID, title: r.TenBai,
-        score: Number(String(r.Diem || "").replace(",", "."))
-      };
-    }),
-    comments: rows(ss, "NHAN_XET").map(function(r) {
-      return {
-        id: r.ID, date: r.Ngay, classId: r.LopHocID,
-        studentId: r.HocSinhID, text: r.NoiDung
-      };
-    }),
-    fees: rows(ss, "HOC_PHI").map(function(r) {
-      return {
-        id: r.ID, studentId: r.HocSinhID, month: r.Thang,
-        amount: Number(r.SoTien || 0), status: r.TrangThai, paidAt: r.NgayDong,
-        classId: r.LopHocID, sessions: Number(r.SoBuoi || 0),
-        unitPrice: Number(r.DonGia || 0)
-      };
-    })
+    students: students, classes: classes, enrollments: enrollments,
+    attendance: attendance, fees: fees, grades: grades, comments: comments
   };
+}
+
+function normalizedText(value) {
+  return String(value || "").trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function findClass(classes, name) {
+  var key = normalizedText(name);
+  return classes.filter(function(item) {
+    return normalizedText(item.name) === key || String(item.id) === String(name);
+  })[0];
+}
+
+function findStudent(students, code, name) {
+  var codeKey = String(code || "").trim();
+  if (codeKey) {
+    var byCode = students.filter(function(item) {
+      return String(item.code || "").trim() === codeKey;
+    })[0];
+    if (byCode) return byCode;
+  }
+  var nameKey = normalizedText(name);
+  if (!nameKey) return null;
+  var matches = students.filter(function(item) {
+    return normalizedText(item.name) === nameKey;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function rows(ss, sheetName) {
@@ -259,6 +334,11 @@ function readParentProfile(pin) {
     }),
     comments: data.comments.filter(function(x) {
       return x.studentId === student.id;
+    }),
+    classes: data.classes.filter(function(c) {
+      return data.enrollments.some(function(x) {
+        return x.studentId === student.id && x.classId === c.id;
+      });
     })
   };
 }
