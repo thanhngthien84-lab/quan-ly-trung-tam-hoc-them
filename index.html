@@ -31,7 +31,7 @@
   <div id="modal-root"></div>
   <script>
     const STORAGE="tt_mvp_v1";
-    const PUBLIC_API_URL=""; // Dán URL Apps Script sau lần triển khai đầu tiên.
+    const PUBLIC_API_URL="https://script.google.com/macros/s/AKfycbybUrOlatKVbsMQNUUpcGiYPYUsiqFBMKGWKi96hEsSHVVa3YhFgdHfNmaXi9GUblgM_g/exec";
     const initial={settings:{name:"TRUNG TÂM HỌC TẬP",apiUrl:"",adminKey:""},students:[],classes:[],enrollments:[],attendance:[],fees:[]};
     let state=JSON.parse(localStorage.getItem(STORAGE)||"null")||structuredClone(initial);
     let currentView="dashboard";
