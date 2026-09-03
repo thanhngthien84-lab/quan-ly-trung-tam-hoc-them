@@ -75,6 +75,7 @@ function setupSheets() {
   ]);
   ss.getSheetByName("LOP_HOC").getRange(1, 5).setValue("HocPhiMoiBuoi");
   configureLearningInput(ss);
+  syncClassScoreSheets(ss);
 }
 
 function configureLearningInput(ss) {
@@ -117,6 +118,111 @@ function ensureColumns(sheet, names) {
   });
 }
 
+function scoreSheetName(classItem) {
+  var safe = String(classItem.TenLop || classItem.ID || "LOP")
+    .replace(/[\\\/?*\[\]:]/g, "-").trim().slice(0, 80);
+  return "DIEM_" + safe;
+}
+
+function findScoreSheet(ss, classId) {
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    if (sheet.getName().indexOf("DIEM_") !== 0 || sheet.getLastRow() < 1) continue;
+    if (String(sheet.getRange("B1").getDisplayValue()) === String(classId)) return sheet;
+  }
+  return null;
+}
+
+function uniqueSheetName(ss, base) {
+  var name = base.slice(0, 95);
+  var candidate = name;
+  var index = 2;
+  while (ss.getSheetByName(candidate)) {
+    candidate = (name.slice(0, 90) + "_" + index).slice(0, 99);
+    index++;
+  }
+  return candidate;
+}
+
+function syncClassScoreSheets(ss) {
+  var classRows = rows(ss, "LOP_HOC");
+  var students = rows(ss, "HOC_SINH");
+  var enrollments = rows(ss, "DANG_KY_LOP");
+  classRows.forEach(function(classItem) {
+    var sheet = findScoreSheet(ss, classItem.ID);
+    if (!sheet) {
+      sheet = ss.insertSheet(uniqueSheetName(ss, scoreSheetName(classItem)));
+    }
+    sheet.getRange("A1:B2").setValues([
+      ["LOP_HOC_ID", classItem.ID],
+      ["TEN_LOP", classItem.TenLop]
+    ]);
+    if (sheet.getLastRow() < 5) {
+      sheet.getRange("A3:B5").setValues([
+        ["MaHS", "HoTen"],
+        ["", ""],
+        ["", ""]
+      ]);
+      sheet.getRange("A3:B3").setFontWeight("bold")
+        .setBackground("#173b5d").setFontColor("#ffffff");
+      sheet.setFrozenRows(5);
+      sheet.setFrozenColumns(2);
+      sheet.setColumnWidth(1, 120);
+      sheet.setColumnWidth(2, 220);
+    }
+    var existing = {};
+    if (sheet.getLastRow() >= 6) {
+      sheet.getRange(6, 1, sheet.getLastRow() - 5, 1)
+        .getDisplayValues().forEach(function(row) {
+          existing[String(row[0]).trim()] = true;
+        });
+    }
+    var memberIds = enrollments.filter(function(item) {
+      return String(item.LopHocID) === String(classItem.ID);
+    }).map(function(item) { return String(item.HocSinhID); });
+    var missing = students.filter(function(student) {
+      return memberIds.indexOf(String(student.ID)) >= 0 &&
+        !existing[String(student.MaHS).trim()];
+    }).map(function(student) {
+      return [String(student.MaHS || ""), student.HoTen || ""];
+    });
+    if (missing.length) {
+      var startRow = Math.max(sheet.getLastRow() + 1, 6);
+      sheet.getRange(startRow, 1, missing.length, 2).setValues(missing);
+      sheet.getRange(startRow, 1, missing.length, 1).setNumberFormat("@");
+    }
+  });
+}
+
+function readClassScores(ss, classes, students) {
+  var result = [];
+  classes.forEach(function(classItem) {
+    var sheet = findScoreSheet(ss, classItem.id);
+    if (!sheet || sheet.getLastRow() < 6 || sheet.getLastColumn() < 3) return;
+    var values = sheet.getDataRange().getDisplayValues();
+    for (var column = 2; column < values[0].length; column++) {
+      var testCode = String((values[2] || [])[column] || "").trim();
+      var title = String((values[3] || [])[column] || "").trim();
+      var date = String((values[4] || [])[column] || "").trim();
+      if (!title && !testCode) continue;
+      for (var row = 5; row < values.length; row++) {
+        var studentCode = String(values[row][0] || "").trim();
+        var rawScore = String(values[row][column] || "").trim().replace(",", ".");
+        if (!studentCode || rawScore === "" || !isFinite(Number(rawScore))) continue;
+        var student = findStudent(students, studentCode, values[row][1]);
+        if (!student) continue;
+        result.push({
+          id: "bang-" + sheet.getSheetId() + "-" + column + "-" + student.id,
+          date: date, classId: classItem.id, studentId: student.id,
+          title: title || testCode || "Bài kiểm tra", score: Number(rawScore)
+        });
+      }
+    }
+  });
+  return result;
+}
+
 function readAllData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   setupSheets();
@@ -130,7 +236,10 @@ function readAllData() {
   var classes = rows(ss, "LOP_HOC").map(function(r) {
     return {
       id: r.ID, name: r.TenLop, subject: r.MonHoc,
-      schedule: r.LichHoc, tuition: r.HocPhiMoiBuoi || r.HocPhiThang
+      schedule: r.LichHoc, tuition: r.HocPhiMoiBuoi || r.HocPhiThang,
+      scoreSheetUrl: findScoreSheet(ss, r.ID)
+        ? ss.getUrl() + "#gid=" + findScoreSheet(ss, r.ID).getSheetId()
+        : ss.getUrl()
     };
   });
   var enrollments = rows(ss, "DANG_KY_LOP").map(function(r) {
@@ -164,6 +273,8 @@ function readAllData() {
     };
   });
 
+  grades = grades.concat(readClassScores(ss, classes, students));
+
   var learningRows = rows(ss, "KET_QUA_HOC_TAP");
   learningRows.forEach(function(r, index) {
     var classItem = findClass(classes, r.TenLop);
@@ -188,7 +299,8 @@ function readAllData() {
 
   return {
     students: students, classes: classes, enrollments: enrollments,
-    attendance: attendance, fees: fees, grades: grades, comments: comments
+    attendance: attendance, fees: fees, grades: grades, comments: comments,
+    spreadsheetUrl: ss.getUrl()
   };
 }
 
@@ -309,6 +421,9 @@ function saveRecord(type, record) {
     }
   } finally {
     lock.releaseLock();
+  }
+  if (type === "enrollment" || type === "student" || type === "class") {
+    syncClassScoreSheets(ss);
   }
 }
 
