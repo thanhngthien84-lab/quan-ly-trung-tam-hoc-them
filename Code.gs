@@ -235,7 +235,11 @@ function readClassScores(ss, classes, students) {
 
 function readAllData(skipSetup) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!skipSetup) setupSheets();
+  if (!skipSetup) {
+    setupSheets();
+    ensureRowIds(ss, "HOC_SINH", "hs");
+    ensureRowIds(ss, "LOP_HOC", "lop");
+  }
 
   var students = rows(ss, "HOC_SINH").map(function(r) {
     return {
@@ -252,7 +256,14 @@ function readAllData(skipSetup) {
         : ss.getUrl()
     };
   });
-  var enrollments = rows(ss, "DANG_KY_LOP").map(function(r) {
+  var enrollmentKeys = {};
+  var enrollments = rows(ss, "DANG_KY_LOP").filter(function(r) {
+    if (!r.HocSinhID || !r.LopHocID) return false;
+    var key = String(r.HocSinhID) + "::" + String(r.LopHocID);
+    if (enrollmentKeys[key]) return false;
+    enrollmentKeys[key] = true;
+    return true;
+  }).map(function(r) {
     return { id: r.ID, studentId: r.HocSinhID, classId: r.LopHocID };
   });
   var attendance = rows(ss, "DIEM_DANH").map(function(r) {
@@ -356,6 +367,20 @@ function rows(ss, sheetName) {
   });
 }
 
+function ensureRowIds(ss, sheetName, prefix) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var lastRow = sheet.getLastRow();
+  var ids = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+  var changed = false;
+  ids.forEach(function(row) {
+    if (String(row[0] || "").trim()) return;
+    row[0] = prefix + "-" + Utilities.getUuid();
+    changed = true;
+  });
+  if (changed) sheet.getRange(2, 1, ids.length, 1).setValues(ids);
+}
+
 function saveEnrollmentBatch(records) {
   if (!Array.isArray(records)) throw new Error("Danh sách xếp lớp không hợp lệ.");
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -369,8 +394,14 @@ function saveEnrollmentBatch(records) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    var seen = {};
     var existing = rows(ss, "DANG_KY_LOP").filter(function(row) {
-      return !selectedStudents[String(row.HocSinhID)];
+      if (!row.HocSinhID || !row.LopHocID) return false;
+      if (selectedStudents[String(row.HocSinhID)]) return false;
+      var key = String(row.HocSinhID) + "::" + String(row.LopHocID);
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
     }).map(function(row) {
       return [row.ID, row.HocSinhID, row.LopHocID];
     });
