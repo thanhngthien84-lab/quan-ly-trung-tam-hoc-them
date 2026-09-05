@@ -33,6 +33,12 @@ function doGet(e) {
       saveRecord(payload.type, payload.record);
       return output({ ok: true, data: readAllData() }, callback);
     }
+    if (mode === "saveEnrollments") {
+      requireAdmin(p.adminKey);
+      var enrollmentPayload = JSON.parse(String(p.payload || "[]"));
+      saveEnrollmentBatch(enrollmentPayload);
+      return output({ ok: true }, callback);
+    }
     throw new Error("Chế độ không hợp lệ.");
   } catch (err) {
     return output({ ok: false, message: err.message || "Có lỗi xảy ra." }, callback);
@@ -348,6 +354,46 @@ function rows(ss, sheetName) {
     headers.forEach(function(header, i) { item[header] = row[i]; });
     return item;
   });
+}
+
+function saveEnrollmentBatch(records) {
+  if (!Array.isArray(records)) throw new Error("Danh sách xếp lớp không hợp lệ.");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("DANG_KY_LOP");
+  if (!sheet) throw new Error("Chưa có sheet DANG_KY_LOP. Hãy chạy setupSheets trước.");
+  var selectedStudents = {};
+  records.forEach(function(record) {
+    if (!record || !record.studentId) return;
+    selectedStudents[String(record.studentId)] = true;
+  });
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var existing = rows(ss, "DANG_KY_LOP").filter(function(row) {
+      return !selectedStudents[String(row.HocSinhID)];
+    }).map(function(row) {
+      return [row.ID, row.HocSinhID, row.LopHocID];
+    });
+    records.forEach(function(record) {
+      if (!record || !record.studentId || !record.classId) return;
+      existing.push([
+        record.id || ("dk-" + new Date().getTime() + "-" + Math.random()),
+        record.studentId,
+        record.classId
+      ]);
+    });
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+    if (existing.length) sheet.getRange(2, 1, existing.length, 3).setValues(existing);
+    var cacheKeys = records.filter(function(record) {
+      return record && /^\d{5}$/.test(String(record.pin || ""));
+    }).map(function(record) {
+      return "parent-profile-" + String(record.pin);
+    });
+    if (cacheKeys.length) CacheService.getScriptCache().removeAll(cacheKeys);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function saveRecord(type, record) {
