@@ -19,8 +19,12 @@ function doGet(e) {
     if (mode === "parent") {
       var pin = digits(p.pin);
       if (!/^\d{5}$/.test(pin)) throw new Error("Mã tra cứu không hợp lệ.");
-      var profile = readParentProfile(pin);
+      var cache = CacheService.getScriptCache();
+      var cacheKey = "parent-profile-" + pin;
+      var cachedProfile = cache.get(cacheKey);
+      var profile = cachedProfile ? JSON.parse(cachedProfile) : readParentProfile(pin);
       if (!profile) throw new Error("Mã tra cứu không chính xác.");
+      if (!cachedProfile) cache.put(cacheKey, JSON.stringify(profile), 120);
       return output({ ok: true, data: profile }, callback);
     }
     if (mode === "save") {
@@ -223,9 +227,9 @@ function readClassScores(ss, classes, students) {
   return result;
 }
 
-function readAllData() {
+function readAllData(skipSetup) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  setupSheets();
+  if (!skipSetup) setupSheets();
 
   var students = rows(ss, "HOC_SINH").map(function(r) {
     return {
@@ -428,7 +432,8 @@ function saveRecord(type, record) {
 }
 
 function readParentProfile(pin) {
-  var data = readAllData();
+  // Cổng PHHS chỉ đọc dữ liệu; không chạy setup/đồng bộ sheet ở mỗi lượt tra cứu.
+  var data = readAllData(true);
   var student = data.students.filter(function(s) {
     return digits(s.pin) === pin;
   })[0];
