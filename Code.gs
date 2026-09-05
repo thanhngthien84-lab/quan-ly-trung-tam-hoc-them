@@ -433,8 +433,27 @@ function readParentProfile(pin) {
     return digits(s.pin) === pin;
   })[0];
   if (!student) return null;
+  var studentGrades = data.grades.filter(function(x) {
+    return x.studentId === student.id;
+  }).map(function(grade) {
+    var sameTest = data.grades.filter(function(item) {
+      return item.classId === grade.classId &&
+        String(item.title || "") === String(grade.title || "") &&
+        String(item.date || "") === String(grade.date || "");
+    });
+    var average = sameTest.length
+      ? sameTest.reduce(function(sum, item) {
+          return sum + Number(item.score || 0);
+        }, 0) / sameTest.length
+      : null;
+    var result = {};
+    Object.keys(grade).forEach(function(key) { result[key] = grade[key]; });
+    result.classAverage = average === null ? null : Number(average.toFixed(2));
+    return result;
+  });
   return {
     student: student,
+    updatedAt: new Date().toISOString(),
     enrollments: data.enrollments.filter(function(x) {
       return x.studentId === student.id;
     }),
@@ -444,9 +463,7 @@ function readParentProfile(pin) {
     fees: data.fees.filter(function(x) {
       return x.studentId === student.id;
     }),
-    grades: data.grades.filter(function(x) {
-      return x.studentId === student.id;
-    }),
+    grades: studentGrades,
     comments: data.comments.filter(function(x) {
       return x.studentId === student.id;
     }),
